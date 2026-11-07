@@ -17,6 +17,25 @@ jobs:
     defaults:
       run:
         working-directory: services/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kumurska
+          POSTGRES_PASSWORD: kumurska
+          POSTGRES_DB: kumurska
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U kumurska"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://kumurska:kumurska@localhost:5432/kumurska
+      TEST_DATABASE_URL: postgresql+asyncpg://kumurska:kumurska@localhost:5432/kumurska_test
+      OTP_SECRET: ci-otp-secret-not-for-production-use
+      JWT_SECRET: ci-jwt-secret-not-for-production-use
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,4 +44,14 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
+      - name: Migrations apply on a clean database
+        run: alembic upgrade head
+      - name: Models and migrations are in sync
+        run: alembic check
+      - name: Migrations roll back
+        run: alembic downgrade base && alembic upgrade head
+      - name: Create test database
+        run: psql -h localhost -U kumurska -d kumurska -c "CREATE DATABASE kumurska_test"
+        env:
+          PGPASSWORD: kumurska
       - run: pytest
