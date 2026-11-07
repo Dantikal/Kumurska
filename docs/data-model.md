@@ -117,6 +117,39 @@ UNIQUE `(source, external_id)`.
 | `status` | ENUM | `draft` / `published` / `unpublished` |
 | `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL |
 
+### `otp_codes` (US-03)
+
+| Поле | Тип | Ограничения |
+|---|---|---|
+| `id` | UUID | PK, он же `verification_id` |
+| `phone` | VARCHAR(20) | `+996XXXXXXXXX` |
+| `purpose` | ENUM | `register` / `reset_password` / `change_phone` |
+| `code_hash` | VARCHAR(64) | HMAC-SHA256 от `"{id}:{code}"`, сам код не хранится |
+| `payload` | JSONB | NULL; данные регистрации, пароль только как argon2-хеш |
+| `attempts` | INT | default 0 |
+| `expires_at` | TIMESTAMPTZ | NOT NULL |
+| `resend_at` | TIMESTAMPTZ | NOT NULL |
+| `consumed_at` | TIMESTAMPTZ | NULL; код использован или аннулирован |
+| `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL |
+
+Индекс `(phone, purpose)`.
+
+### `refresh_tokens` (US-03)
+
+| Поле | Тип | Ограничения |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK → `users.id`, INDEX |
+| `token_hash` | VARCHAR(64) | SHA-256 токена, UNIQUE |
+| `expires_at` | TIMESTAMPTZ | NOT NULL |
+| `revoked_at` | TIMESTAMPTZ | NULL (ротация — US-25) |
+| `created_at` | TIMESTAMPTZ | NOT NULL |
+
+### Начальные данные
+
+Сид-миграция `b3c5e1f7a2d4` создаёт уровень «Базовый» (порог 0, кешбэк 3 %).
+Новый бонусный счёт получает действующий уровень с минимальным `threshold`.
+
 ## Связи
 
 ```mermaid
@@ -126,6 +159,7 @@ erDiagram
     bonus_accounts ||--o{ bonus_transactions : "1:N"
     purchases ||--o{ bonus_transactions : "0:N"
     users ||--o{ purchases : "1:N"
+    users ||--o{ refresh_tokens : "1:N"
     purchases ||--o{ purchase_items : "1:N"
 ```
 
