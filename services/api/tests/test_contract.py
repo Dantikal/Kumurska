@@ -26,10 +26,9 @@ def test_all_methods_present():
             assert m in paths[path], f"Нет метода {m} {path}"
 
 
-def test_stub_returns_501():
+def test_profile_requires_authentication():
     resp = client.get("/api/v1/users/me")
-    assert resp.status_code == 501
-    assert resp.json()["error"]["code"] == "NOT_IMPLEMENTED"
+    assert resp.status_code == 401
 
 
 def test_all_tables_registered():
