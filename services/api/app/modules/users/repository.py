@@ -1,4 +1,5 @@
-# app/modules/users/repository.py
+"""Запросы к базе данных."""
+
 import uuid
 
 from sqlalchemy import select
