@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Регистрация</title>
+<style>
+  * { box-sizing: border-box; }
+  body { max-width: 380px; margin: 40px auto; padding: 0 16px; font: 16px/1.4 system-ui, sans-serif; color: #222; }
+  h1 { font-size: 24px; }
+  .field { margin-bottom: 14px; }
+  .field > label { display: block; margin-bottom: 4px; font-size: 14px; }
+  .box { position: relative; display: flex; align-items: center; border: 1px solid #bbb; border-radius: 8px; background: #fff; }
+  .box.invalid { border-color: #d32f2f; }
+  .box input { flex: 1; min-width: 0; padding: 11px 12px; border: 0; border-radius: 8px; font: inherit; background: none; }
+  .box span { padding-left: 12px; }
+  .box button { padding: 8px 10px; border: 0; background: none; font-size: 16px; cursor: pointer; }
+  .box input.picker { position: absolute; right: 0; bottom: 0; flex: none; width: 0; height: 0; padding: 0; opacity: 0; }
+  .error { display: block; min-height: 18px; color: #d32f2f; font-size: 13px; }
+  .agree { font-size: 14px; }
+  #submit, #code-submit { width: 100%; padding: 13px; border: 0; border-radius: 8px; background: #1a73e8; color: #fff; font: inherit; cursor: pointer; }
+  #submit:disabled, #code-submit:disabled { background: #c5c9d0; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<form id="form" novalidate>
+  <h1>Регистрация</h1>
+
+  <div class="field">
+    <label for="name">Имя</label>
+    <div class="box"><input id="name" maxlength="100" autocomplete="name"></div>
+    <small class="error" id="name-error"></small>
+  </div>
+
+  <div class="field">
+    <label for="phone">Телефон</label>
+    <div class="box"><span>+996</span><input id="phone" type="tel" inputmode="numeric" placeholder="XXX XXX XXX" autocomplete="tel-national"></div>
+    <small class="error" id="phone-error"></small>
+  </div>
+
+  <div class="field">
+    <label for="password">Пароль</label>
+    <div class="box"><input id="password" type="password" autocomplete="new-password"><button type="button" data-eye="password" aria-label="Показать пароль">👁</button></div>
+    <small class="error" id="password-error"></small>
+  </div>
+
+  <div class="field">
+    <label for="password2">Повтор пароля</label>
+    <div class="box"><input id="password2" type="password" autocomplete="new-password"><button type="button" data-eye="password2" aria-label="Показать пароль">👁</button></div>
+    <small class="error" id="password2-error"></small>
+  </div>
+
+  <div class="field">
+    <label for="birth">Дата рождения</label>
+    <div class="box">
+      <input id="birth" inputmode="numeric" placeholder="дд.мм.гггг" autocomplete="bday">
+      <button type="button" id="calendar" aria-label="Открыть календарь">📅</button>
+      <input id="picker" class="picker" type="date" tabindex="-1" aria-hidden="true">
+    </div>
+    <small class="error" id="birth-error"></small>
+  </div>
+
+  <div class="field agree">
+    <label>
+      <input id="agree" type="checkbox">
+      Принимаю <a href="#">условия бонусной программы</a> и <a href="#">политику конфиденциальности</a>
+    </label>
+    <small class="error" id="agree-error"></small>
+  </div>
+
+  <small class="error" id="form-error"></small>
+  <button id="submit" disabled>Продолжить</button>
+</form>
+
+<!-- US-03: логика подтверждения кода будет здесь -->
+<section id="code-screen" hidden>
+  <h1>Введите код из SMS</h1>
+  <p>Код отправлен на номер <b id="code-phone"></b></p>
+  <form id="code-form" novalidate>
+    <div class="field">
+      <div class="box"><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Код" aria-label="Код из SMS" maxlength="10"></div>
+      <small class="error" id="code-error"></small>
+    </div>
+    <button id="code-submit" disabled>Подтвердить</button>
+  </form>
+</section>
+
+<section id="done-screen" hidden>
+  <h1>Регистрация завершена</h1>
+  <p>Номер подтверждён.</p>
+</section>
+
+<script>
+  // Поля API, которые в форме называются иначе.
+  const FORM_FIELDS = { birth_date: 'birth', accepted_terms: 'agree' };
+
+  async function postJson(url, data) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }).catch(() => { throw new Error('Нет связи с сервером'); });
+    return { ok: res.ok, body: await res.json().catch(() => ({})) };
+  }
+
+  async function verifyCode(verification_id, code) {
+    const { ok, body } = await postJson('/api/v1/auth/otp/verify', { verification_id, code });
+    if (ok) return;
+    const { message = 'Не удалось проверить код', details = {} } = body.error || {};
+    throw new Error(details.attempts_left ? `${message}. Осталось попыток: ${details.attempts_left}` : message);
+  }
+
+  async function register(data) {
+    const { ok, body } = await postJson('/api/v1/auth/register', data);
+    if (ok) return body;
+
+    const { code, message = 'Не удалось отправить форму', details = {} } = body.error || {};
+    if (code === 'PHONE_ALREADY_REGISTERED') throw Object.assign(new Error(message), { field: 'phone' });
+    const [invalid] = details.fields || [];
+    if (invalid) {
+      const name = invalid.field.split('.').pop();
+      const field = FORM_FIELDS[name] || name;
+      if (field in rules) throw Object.assign(new Error(invalid.message.replace(/^Value error, /, '')), { field });
+    }
+    throw new Error(message);
+  }
+
+  const $ = id => document.getElementById(id);
+  const digits = s => s.replace(/\D/g, '');
+  const touched = new Set();
+  const serverErrors = {};
+  let submitting = false;
+
+  // Возвращает "гггг-мм-дд" для реальной даты из прошлого, иначе null.
+  function parseDate(value) {
+    const m = value.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (!m) return null;
+    const [, d, mo, y] = m.map(Number);
+    const date = new Date(y, mo - 1, d);
+    const real = date.getFullYear() === y && date.getMonth() === mo - 1 && date.getDate() === d;
+    return real && y >= 1900 && date <= new Date() ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  }
+
+  const rules = {
+    name: v => v.trim() ? '' : 'Введите имя',
+    phone: v => !v ? 'Введите номер телефона' : digits(v).length === 9 ? '' : 'Номер должен содержать 9 цифр',
+    password: v => !v ? 'Введите пароль' : v.length < 8 ? 'Пароль должен содержать не менее 8 символов' : v.length > 128 ? 'Пароль должен содержать не более 128 символов' : '',
+    password2: v => !v ? 'Повторите пароль' : v === $('password').value ? '' : 'Пароли не совпадают',
+    birth: v => !v ? 'Укажите дату рождения' : parseDate(v) ? '' : 'Некорректная дата',
+    agree: () => $('agree').checked ? '' : 'Необходимо принять условия',
+  };
+
+  function render() {
+    let valid = true;
+    for (const id in rules) {
+      const error = rules[id]($(id).value) || serverErrors[id];
+      if (error) valid = false;
+      const shown = touched.has(id) ? error : '';
+      $(id + '-error').textContent = shown;
+      $(id).closest('.box')?.classList.toggle('invalid', !!shown);
+    }
+    $('submit').disabled = !valid || submitting;
+  }
+
+  // Применяет маску, не сбивая курсор при правке в середине строки.
+  function applyMask(input, format) {
+    const before = digits(input.value.slice(0, input.selectionStart)).length;
+    input.value = format(digits(input.value));
+    let pos = 0;
+    for (let seen = 0; seen < before && pos < input.value.length; pos++) {
+      if (/\d/.test(input.value[pos])) seen++;
+    }
+    input.setSelectionRange(pos, pos);
+  }
+
+  $('phone').addEventListener('input', e => applyMask(e.target, d => {
+    if (d.length === 12 && d.startsWith('996')) d = d.slice(3); // вставка или автозаполнение с кодом страны
+    return d.replace(/^0+/, '').slice(0, 9).replace(/(\d{3})(?=\d)/g, '$1 ');
+  }));
+
+  $('birth').addEventListener('input', e => applyMask(e.target, d => d.slice(0, 8)
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2}\.\d{2})(\d)/, '$1.$2')));
+
+  document.querySelectorAll('[data-eye]').forEach(button => button.addEventListener('click', () => {
+    const input = $(button.dataset.eye);
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }));
+
+  $('picker').max = new Date().toLocaleDateString('sv');
+  $('calendar').addEventListener('click', () => $('picker').showPicker());
+  $('picker').addEventListener('change', e => {
+    if (!e.target.value) return;
+    $('birth').value = e.target.value.split('-').reverse().join('.');
+    touched.add('birth');
+    render();
+  });
+
+  $('form').addEventListener('focusout', e => { touched.add(e.target.id); render(); });
+  $('form').addEventListener('input', e => {
+    if (e.target.id === 'agree') touched.add('agree');
+    delete serverErrors[e.target.id];
+    render();
+  });
+
+  $('form').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('form-error').textContent = '';
+    submitting = true;
+    render();
+    const phone = '+996' + digits($('phone').value);
+    try {
+      const sent = await register({
+        name: $('name').value.trim(),
+        phone,
+        birth_date: parseDate($('birth').value),
+        password: $('password').value,
+        accepted_terms: $('agree').checked,
+      });
+      // US-03: verification_id нужен для POST /api/v1/auth/otp/verify.
+      $('code-screen').dataset.verificationId = sent.verification_id;
+      $('code-phone').textContent = sent.phone_masked;
+      $('form').hidden = true;
+      $('code-screen').hidden = false;
+      $('code').focus();
+    } catch (err) {
+      if (err.field) {
+        serverErrors[err.field] = err.message;
+        touched.add(err.field);
+      } else {
+        $('form-error').textContent = err.message;
+      }
+    } finally {
+      submitting = false;
+      render();
+    }
+  });
+
+  $('code').addEventListener('input', e => {
+    e.target.value = digits(e.target.value);
+    $('code-error').textContent = '';
+    $('code').closest('.box').classList.remove('invalid');
+    $('code-submit').disabled = !e.target.value;
+  });
+
+  $('code-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('code-submit').disabled = true;
+    try {
+      await verifyCode($('code-screen').dataset.verificationId, $('code').value);
+      $('code-screen').hidden = true;
+      $('done-screen').hidden = false;
+    } catch (err) {
+      $('code-error').textContent = err.message;
+      $('code').closest('.box').classList.add('invalid');
+      $('code-submit').disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
