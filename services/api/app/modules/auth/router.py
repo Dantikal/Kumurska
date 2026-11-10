@@ -7,6 +7,7 @@ from app.core.schemas import ErrorResponse
 from app.integrations.sms import SmsProvider, get_sms_provider
 from app.modules.auth import service
 from app.modules.auth.schemas import (
+    LoginRequest,
     OtpResendRequest,
     OtpSentResponse,
     OtpVerifyRequest,
@@ -34,6 +35,23 @@ async def register(
 ) -> OtpSentResponse:
     """Принимает форму регистрации и отправляет SMS-код. Пользователь создаётся после verify."""
     return await service.register(db, sms, payload)
+
+
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "INVALID_CREDENTIALS"},
+        403: {"model": ErrorResponse, "description": "USER_BLOCKED"},
+        422: {"model": ErrorResponse, "description": "VALIDATION_ERROR"},
+    },
+)
+async def login(
+    payload: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """Вход по номеру телефона и паролю. Выдаёт токены."""
+    return await service.login(db, payload.phone, payload.password)
 
 
 @router.post(
