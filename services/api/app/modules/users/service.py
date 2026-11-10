@@ -14,6 +14,10 @@ async def get_user(session: AsyncSession, user_id: uuid.UUID) -> User | None:
     return await repository.get_by_id(session, user_id)
 
 
+async def get_by_phone(session: AsyncSession, phone: str) -> User | None:
+    return await repository.get_by_phone(session, phone)
+
+
 async def phone_exists(session: AsyncSession, phone: str) -> bool:
     return await repository.get_by_phone(session, phone) is not None
 

@@ -35,6 +35,11 @@ class RegisterRequest(BaseModel):
         return value
 
 
+class LoginRequest(BaseModel):
+    phone: Phone
+    password: Annotated[str, Field(min_length=1, max_length=128)]
+
+
 class OtpVerifyRequest(BaseModel):
     verification_id: UUID
     code: Annotated[str, StringConstraints(pattern=r"^\d{1,10}$")]

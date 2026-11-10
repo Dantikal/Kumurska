@@ -14,6 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from anyio import to_thread
 from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,8 +32,11 @@ from app.modules.auth.schemas import (
 from app.modules.auth.tokens import issue_tokens
 from app.modules.loyalty import service as loyalty_service
 from app.modules.users import service as users_service
+from app.modules.users.models import UserStatus
 
 _password_hasher = PasswordHasher()
+# Проверяется, когда у номера нет пароля: время ответа не выдаёт, зарегистрирован ли номер.
+_dummy_password_hash = _password_hasher.hash(secrets.token_urlsafe(16))
 
 
 # --- ошибки -----------------------------------------------------------------
@@ -159,6 +163,35 @@ async def resend(db: AsyncSession, sms: SmsProvider, verification_id: uuid.UUID)
 
     return await _create_and_send(
         db, sms, phone=otp.phone, purpose=otp.purpose, payload=otp.payload, now=now
+    )
+
+
+def _password_matches(password_hash: str, password: str) -> bool:
+    try:
+        return _password_hasher.verify(password_hash, password)
+    except (VerificationError, InvalidHashError):
+        return False
+
+
+async def login(db: AsyncSession, phone: str, password: str) -> TokenResponse:
+    user = await users_service.get_by_phone(db, phone)
+    password_hash = user.password_hash if user else None
+    matches = await to_thread.run_sync(
+        _password_matches, password_hash or _dummy_password_hash, password
+    )
+    # Один ответ на все случаи: нельзя узнать, зарегистрирован ли номер.
+    if user is None or password_hash is None or not matches:
+        raise ApiError(401, "INVALID_CREDENTIALS", "Неверный номер или пароль")
+    if user.status in (UserStatus.BLOCKED, UserStatus.DELETED):
+        raise ApiError(403, "USER_BLOCKED", "Доступ к аккаунту ограничен")
+
+    tokens = await issue_tokens(db, user.id)
+    await db.commit()
+
+    return TokenResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        expires_in=tokens.expires_in,
     )
 
 
