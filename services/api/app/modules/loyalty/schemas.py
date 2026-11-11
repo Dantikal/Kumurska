@@ -23,6 +23,8 @@ class BonusAccountRead(BaseModel):
     id: UUID
     user_id: UUID
     level_id: UUID
+    level_name: str
+    cashback_percent: Decimal
     balance: int
     accumulated_total: Decimal
     level_expires_at: datetime | None

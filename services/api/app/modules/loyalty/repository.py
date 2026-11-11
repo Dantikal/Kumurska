@@ -1,10 +1,11 @@
 # app/modules/loyalty/repository.py
+import uuid
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.loyalty.models import BonusAccount, LevelStatus, LoyaltyLevel
+from app.modules.loyalty.models import AccountStatus, BonusAccount, LevelStatus, LoyaltyLevel
 
 
 async def get_entry_level(session: AsyncSession, now: datetime) -> LoyaltyLevel | None:
@@ -20,3 +21,20 @@ async def get_entry_level(session: AsyncSession, now: datetime) -> LoyaltyLevel 
 
 def add_account(session: AsyncSession, account: BonusAccount) -> None:
     session.add(account)
+
+
+async def get_account_with_level(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+) -> tuple[BonusAccount, LoyaltyLevel] | None:
+    stmt = (
+        select(BonusAccount, LoyaltyLevel)
+        .join(LoyaltyLevel, LoyaltyLevel.id == BonusAccount.level_id)
+        .where(
+            BonusAccount.user_id == user_id,
+            BonusAccount.status == AccountStatus.ACTIVE,
+        )
+    )
+
+    result = await session.execute(stmt)
+    return result.one_or_none()
