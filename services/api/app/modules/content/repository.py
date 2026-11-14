@@ -26,8 +26,7 @@ async def get_upcoming_events(
         query = query.where(
             or_(
                 Event.starts_at > cursor_starts_at,
-                (Event.starts_at == cursor_starts_at)
-                & (Event.id > cursor_id),
+                (Event.starts_at == cursor_starts_at) & (Event.id > cursor_id),
             )
         )
 

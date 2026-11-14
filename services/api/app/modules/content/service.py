@@ -23,9 +23,7 @@ def encode_cursor(event: Event) -> str:
 
     cursor_json = json.dumps(cursor_data)
 
-    return base64.urlsafe_b64encode(
-        cursor_json.encode()
-    ).decode()
+    return base64.urlsafe_b64encode(cursor_json.encode()).decode()
 
 
 def decode_cursor(

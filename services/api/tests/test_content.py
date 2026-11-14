@@ -44,12 +44,14 @@ async def test_repository_returns_only_upcoming_published_events(session_factory
     )
 
     async with session_factory() as session:
-        session.add_all([
-            first_event,
-            second_event,
-            draft_event,
-            started_event,
-        ])
+        session.add_all(
+            [
+                first_event,
+                second_event,
+                draft_event,
+                started_event,
+            ]
+        )
         await session.flush()
 
         result = await repository.get_upcoming_events(
@@ -62,7 +64,6 @@ async def test_repository_returns_only_upcoming_published_events(session_factory
             second_event.id,
             first_event.id,
         ]
-
 
 
 @pytest.mark.anyio
@@ -115,10 +116,7 @@ async def test_service_paginates_upcoming_events(session_factory):
         assert len(second_page.items) == 1
         assert second_page.next_cursor is None
 
-        all_ids = [
-            event.id
-            for event in first_page.items + second_page.items
-        ]
+        all_ids = [event.id for event in first_page.items + second_page.items]
 
         assert len(all_ids) == len(set(all_ids))
         assert len(all_ids) == 3
@@ -129,7 +127,6 @@ def test_decode_cursor_rejects_invalid_cursor():
         service.decode_cursor("invalid_cursor")
 
     assert exc_info.value.status_code == 400
-
 
 
 @pytest.mark.anyio
@@ -168,7 +165,6 @@ async def test_list_upcoming_events_endpoint(api, session_factory):
     assert data["next_cursor"] is None
 
 
-
 @pytest.mark.anyio
 async def test_list_events_returns_400_for_invalid_cursor(api):
     response = await api.get(
@@ -177,7 +173,6 @@ async def test_list_events_returns_400_for_invalid_cursor(api):
     )
 
     assert response.status_code == 400
-
 
 
 @pytest.mark.anyio
