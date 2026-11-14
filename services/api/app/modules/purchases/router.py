@@ -1,11 +1,16 @@
-# app/modules/purchases/router.py
+"""Маршруты покупок."""
+
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ApiError
+from app.core.database import get_db
 from app.core.schemas import ErrorResponse
+from app.modules.auth.dependencies import get_current_user
+from app.modules.purchases import service as purchases_service
 from app.modules.purchases.schemas import PurchaseRead
+from app.modules.users.models import User
 
 router = APIRouter(prefix="/purchases", tags=["purchases"])
 
@@ -15,5 +20,13 @@ router = APIRouter(prefix="/purchases", tags=["purchases"])
     response_model=PurchaseRead,
     responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
 )
-async def get_purchase(id: UUID) -> PurchaseRead:
-    raise ApiError(501, "NOT_IMPLEMENTED", "Метод ещё не реализован")
+async def get_purchase(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PurchaseRead:
+    return await purchases_service.get_purchase_details(
+        db,
+        id,
+        current_user.id,
+    )
