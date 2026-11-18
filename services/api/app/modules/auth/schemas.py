@@ -56,6 +56,10 @@ class OtpSentResponse(BaseModel):
     resend_in: int = Field(description="Секунд до возможности запросить новый код")
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: Annotated[str, Field(min_length=1, max_length=256)]
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

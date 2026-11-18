@@ -27,6 +27,9 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://kumurska:kumurska@localhost:5433/kumurska_test",
 )
 
+# X-Device-Id, который тестовый клиент шлёт по умолчанию
+DEVICE_ID = "6f1c2b0e-4f1a-4c39-9a57-0b8f3d1e2a11"
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -116,7 +119,9 @@ async def api(
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_sms_provider] = lambda: sms
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-Device-Id": DEVICE_ID}
+    ) as client:
         yield client
     app.dependency_overrides.clear()
 

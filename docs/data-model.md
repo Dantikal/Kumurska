@@ -134,16 +134,35 @@ UNIQUE `(source, external_id)`.
 
 Индекс `(phone, purpose)`.
 
-### `refresh_tokens` (US-03)
+### `sessions` (US-25)
+
+Сессия устройства. `id` передаётся в access-токене как `sid`.
+
+| Поле | Тип | Ограничения |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK → `users.id` |
+| `device_id` | VARCHAR(100) | из заголовка `X-Device-Id` |
+| `revoked_at` | TIMESTAMPTZ | NULL; сессия отозвана (выход, кража токена, новый вход с устройства) |
+| `last_used_at` | TIMESTAMPTZ | NOT NULL; последний обмен refresh-токена |
+| `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL |
+
+Индекс `(user_id, device_id)`. На устройство одна действующая сессия: новый вход
+с тем же `device_id` отзывает прежнюю.
+
+### `refresh_tokens` (US-03, US-25)
 
 | Поле | Тип | Ограничения |
 |---|---|---|
 | `id` | UUID | PK |
 | `user_id` | UUID | FK → `users.id`, INDEX |
+| `session_id` | UUID | FK → `sessions.id`, INDEX |
 | `token_hash` | VARCHAR(64) | SHA-256 токена, UNIQUE |
-| `expires_at` | TIMESTAMPTZ | NOT NULL |
-| `revoked_at` | TIMESTAMPTZ | NULL (ротация — US-25) |
+| `expires_at` | TIMESTAMPTZ | NOT NULL; через 30 дней |
+| `used_at` | TIMESTAMPTZ | NULL; токен обменян на новый |
 | `created_at` | TIMESTAMPTZ | NOT NULL |
+
+Токен одноразовый. Повторное предъявление токена с `used_at` отзывает всю сессию.
 
 ### Начальные данные
 
@@ -159,7 +178,8 @@ erDiagram
     bonus_accounts ||--o{ bonus_transactions : "1:N"
     purchases ||--o{ bonus_transactions : "0:N"
     users ||--o{ purchases : "1:N"
-    users ||--o{ refresh_tokens : "1:N"
+    users ||--o{ sessions : "1:N"
+    sessions ||--o{ refresh_tokens : "1:N"
     purchases ||--o{ purchase_items : "1:N"
 ```
 

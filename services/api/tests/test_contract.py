@@ -11,6 +11,11 @@ client = TestClient(app)
 def test_all_methods_present():
     paths = app.openapi()["paths"]
     expected = {
+        "/api/v1/auth/register": {"post"},
+        "/api/v1/auth/login": {"post"},
+        "/api/v1/auth/otp/verify": {"post"},
+        "/api/v1/auth/refresh": {"post"},
+        "/api/v1/auth/logout": {"post"},
         "/api/v1/users/me": {"get", "patch"},
         "/api/v1/loyalty/account": {"get"},
         "/api/v1/loyalty/levels": {"get"},
@@ -41,5 +46,7 @@ def test_all_tables_registered():
         "purchase_items",
         "promotions",
         "events",
+        "sessions",
+        "refresh_tokens",
     }
     assert expected.issubset(set(Base.metadata.tables.keys()))

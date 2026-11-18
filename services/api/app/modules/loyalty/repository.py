@@ -30,6 +30,26 @@ def add_account(session: AsyncSession, account: BonusAccount) -> None:
     session.add(account)
 
 
+async def get_purchase_transactions(
+    session: AsyncSession,
+    purchase_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> list[BonusTransaction]:
+    stmt = (
+        select(BonusTransaction)
+        .join(BonusAccount, BonusTransaction.account_id == BonusAccount.id)
+        .where(
+            BonusTransaction.purchase_id == purchase_id,
+            BonusAccount.user_id == user_id,
+            BonusTransaction.status == TransactionStatus.CONFIRMED,
+        )
+        .order_by(BonusTransaction.created_at.asc())
+    )
+
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_account_with_level(
     session: AsyncSession,
     user_id: uuid.UUID,

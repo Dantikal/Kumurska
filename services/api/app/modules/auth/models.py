@@ -36,14 +36,37 @@ class OtpCode(IdMixin, TimestampMixin, Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Session(IdMixin, TimestampMixin, Base):
+    """Сессия устройства. id попадает в access-токен как sid.
+
+    На одно устройство пользователя — одна действующая сессия: новый вход с тем же
+    device_id отзывает прежнюю.
+    """
+
+    __tablename__ = "sessions"
+    __table_args__ = (Index("ix_sessions_user_id_device_id", "user_id", "device_id"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    device_id: Mapped[str] = mapped_column(String(100))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class RefreshToken(IdMixin, Base):
-    """Refresh-токен. Хранится только SHA-256 хеш; ротация и устройства — US-25."""
+    """Refresh-токен сессии. Хранится только SHA-256 хеш.
+
+    Токен одноразовый: при обмене заполняется used_at и выдаётся новый в той же сессии.
+    Повторное предъявление использованного токена отзывает всю сессию.
+    """
 
     __tablename__ = "refresh_tokens"
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,8 +1,8 @@
 # app/modules/auth/service.py
-"""Регистрация с подтверждением номера по SMS (US-03).
+"""Регистрация (US-03), вход (US-04), сессии устройств и обновление токенов (US-25).
 
-Коды и пароли в открытом виде не логируются, не возвращаются и не сохраняются:
-код живёт только в тексте SMS, в базе — HMAC; пароль — только argon2-хеш.
+Коды, пароли и refresh-токены в открытом виде не логируются и не сохраняются:
+код живёт только в тексте SMS, в базе — HMAC; пароль — argon2-хеш; refresh — SHA-256.
 """
 
 import hashlib
@@ -29,7 +29,12 @@ from app.modules.auth.schemas import (
     RegisterRequest,
     TokenResponse,
 )
-from app.modules.auth.tokens import issue_tokens
+from app.modules.auth.tokens import (
+    TokenPair,
+    hash_refresh_token,
+    issue_session_tokens,
+    issue_tokens,
+)
 from app.modules.loyalty import service as loyalty_service
 from app.modules.users import service as users_service
 from app.modules.users.models import UserStatus
@@ -44,6 +49,19 @@ _dummy_password_hash = _password_hasher.hash(secrets.token_urlsafe(16))
 
 def _phone_already_registered() -> ApiError:
     return ApiError(409, "PHONE_ALREADY_REGISTERED", "Номер уже зарегистрирован")
+
+
+def _user_blocked() -> ApiError:
+    return ApiError(403, "USER_BLOCKED", "Доступ к аккаунту ограничен")
+
+
+def session_expired() -> ApiError:
+    return ApiError(
+        401,
+        "SESSION_EXPIRED",
+        "Сессия завершена, войдите заново",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def _otp_not_found() -> ApiError:
@@ -173,7 +191,15 @@ def _password_matches(password_hash: str, password: str) -> bool:
         return False
 
 
-async def login(db: AsyncSession, phone: str, password: str) -> TokenResponse:
+def _token_response(tokens: TokenPair) -> TokenResponse:
+    return TokenResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        expires_in=tokens.expires_in,
+    )
+
+
+async def login(db: AsyncSession, phone: str, password: str, device_id: str) -> TokenResponse:
     user = await users_service.get_by_phone(db, phone)
     password_hash = user.password_hash if user else None
     matches = await to_thread.run_sync(
@@ -183,19 +209,16 @@ async def login(db: AsyncSession, phone: str, password: str) -> TokenResponse:
     if user is None or password_hash is None or not matches:
         raise ApiError(401, "INVALID_CREDENTIALS", "Неверный номер или пароль")
     if user.status in (UserStatus.BLOCKED, UserStatus.DELETED):
-        raise ApiError(403, "USER_BLOCKED", "Доступ к аккаунту ограничен")
+        raise _user_blocked()
 
-    tokens = await issue_tokens(db, user.id)
+    tokens = await issue_tokens(db, user.id, device_id)
     await db.commit()
-
-    return TokenResponse(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        expires_in=tokens.expires_in,
-    )
+    return _token_response(tokens)
 
 
-async def verify(db: AsyncSession, verification_id: uuid.UUID, code: str) -> TokenResponse:
+async def verify(
+    db: AsyncSession, verification_id: uuid.UUID, code: str, device_id: str
+) -> TokenResponse:
     # FOR UPDATE: параллельные попытки с одним verification_id выполняются по очереди.
     otp = await repository.get_otp_for_update(db, verification_id, OtpPurpose.REGISTER)
     if otp is None or otp.consumed_at is not None:
@@ -230,11 +253,59 @@ async def verify(db: AsyncSession, verification_id: uuid.UUID, code: str) -> Tok
         raise _phone_already_registered() from None
 
     await loyalty_service.open_account(db, user.id)
-    tokens = await issue_tokens(db, user.id)
+    tokens = await issue_tokens(db, user.id, device_id)
+    await db.commit()
+    return _token_response(tokens)
+
+
+# --- сессии (US-25) -----------------------------------------------------------
+
+
+async def refresh(db: AsyncSession, refresh_token: str, device_id: str) -> TokenResponse:
+    """Обменивает refresh-токен на новую пару в той же сессии.
+
+    Строгий режим: повторное предъявление уже обменянного токена считается кражей
+    и отзывает всю сессию, без окна на повтор. Клиент обязан делать один refresh за раз.
+    """
+    # FOR UPDATE: параллельные обмены одного токена идут по очереди, успешен ровно один.
+    token = await repository.get_refresh_token_for_update(db, hash_refresh_token(refresh_token))
+    if token is None:
+        raise session_expired()
+    auth_session = await repository.get_session(db, token.session_id)
+    if auth_session is None or auth_session.revoked_at is not None:
+        raise session_expired()
+
+    now = datetime.now(UTC)
+    if token.used_at is not None:
+        await repository.revoke_session(db, auth_session.id, now)
+        await db.commit()
+        raise session_expired()
+    if now >= token.expires_at or auth_session.device_id != device_id:
+        raise session_expired()
+
+    user = await users_service.get_user(db, auth_session.user_id)
+    if user is None or user.status in (UserStatus.BLOCKED, UserStatus.DELETED):
+        raise _user_blocked()
+
+    token.used_at = now
+    auth_session.last_used_at = now
+    tokens = issue_session_tokens(db, auth_session, now)
+    await db.commit()
+    return _token_response(tokens)
+
+
+async def logout(db: AsyncSession, user_id: uuid.UUID, session_id: uuid.UUID) -> None:
+    """Отзывает сессию. Идемпотентно: уже отозванная сессия — не ошибка."""
+    auth_session = await repository.get_session(db, session_id)
+    if auth_session is None or auth_session.user_id != user_id:
+        return
+    await repository.revoke_session(db, session_id, datetime.now(UTC))
     await db.commit()
 
-    return TokenResponse(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        expires_in=tokens.expires_in,
-    )
+
+async def revoke_all_user_sessions(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Отзывает все сессии пользователя (для удаления аккаунта, US-35).
+
+    Не коммитит: вызывающий сценарий делает это в своей транзакции.
+    """
+    await repository.revoke_user_sessions(db, user_id, datetime.now(UTC))

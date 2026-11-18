@@ -11,17 +11,31 @@
           "auth"
         ],
         "summary": "Register",
-        "description": "Принимает форму регистрации и отправляет SMS-код. Пользователь создаётся после verify.",
+        "description": "Принимает форму регистрации и отправляет SMS-код. Пользователь создаётся после verify.\n\nЗаголовок X-Device-Id обязателен для единообразия с verify, где открывается сессия.",
         "operationId": "register_api_v1_auth_register_post",
+        "parameters": [
+          {
+            "name": "X-Device-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "UUID устройства: приложение генерирует его один раз и хранит локально",
+              "title": "X-Device-Id"
+            },
+            "description": "UUID устройства: приложение генерирует его один раз и хранит локально"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RegisterRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -73,17 +87,31 @@
           "auth"
         ],
         "summary": "Login",
-        "description": "Вход по номеру телефона и паролю. Выдаёт токены.",
+        "description": "Вход по номеру телефона и паролю. Открывает сессию устройства и выдаёт токены.\n\nПрежняя сессия этого же устройства (X-Device-Id) отзывается.",
         "operationId": "login_api_v1_auth_login_post",
+        "parameters": [
+          {
+            "name": "X-Device-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "UUID устройства: приложение генерирует его один раз и хранит локально",
+              "title": "X-Device-Id"
+            },
+            "description": "UUID устройства: приложение генерирует его один раз и хранит локально"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LoginRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -135,17 +163,31 @@
           "auth"
         ],
         "summary": "Verify Otp",
-        "description": "Проверяет код, создаёт пользователя и бонусный счёт, выдаёт токены.",
+        "description": "Проверяет код, создаёт пользователя и бонусный счёт, открывает сессию и выдаёт токены.",
         "operationId": "verify_otp_api_v1_auth_otp_verify_post",
+        "parameters": [
+          {
+            "name": "X-Device-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "UUID устройства: приложение генерирует его один раз и хранит локально",
+              "title": "X-Device-Id"
+            },
+            "description": "UUID устройства: приложение генерирует его один раз и хранит локально"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OtpVerifyRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -273,6 +315,112 @@
         }
       }
     },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh",
+        "description": "Обменивает refresh-токен на новую пару. Старый refresh больше не действует.\n\nПовторное предъявление уже обменянного refresh отзывает всю сессию.\nКлиент должен выполнять не больше одного refresh одновременно.",
+        "operationId": "refresh_api_v1_auth_refresh_post",
+        "parameters": [
+          {
+            "name": "X-Device-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "UUID устройства: приложение генерирует его один раз и хранит локально",
+              "title": "X-Device-Id"
+            },
+            "description": "UUID устройства: приложение генерирует его один раз и хранит локально"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED: токен неверный, истёк, уже использован, выдан другому устройству или сессия отозвана. Клиент очищает сессию и показывает вход.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "USER_BLOCKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "description": "Завершает текущую сессию (sid из access-токена). Повторный вызов тоже возвращает 204.\n\nПосле выхода access-токен этой сессии сразу перестаёт приниматься, refresh — тоже.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "NOT_AUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/users/me": {
       "get": {
         "tags": [
@@ -301,7 +449,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -350,7 +503,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/loyalty/account": {
@@ -381,7 +539,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/loyalty/levels": {
@@ -779,6 +942,14 @@
             "format": "uuid",
             "title": "Level Id"
           },
+          "level_name": {
+            "type": "string",
+            "title": "Level Name"
+          },
+          "cashback_percent": {
+            "type": "string",
+            "title": "Cashback Percent"
+          },
           "balance": {
             "type": "integer",
             "title": "Balance"
@@ -819,6 +990,8 @@
           "id",
           "user_id",
           "level_id",
+          "level_name",
+          "cashback_percent",
           "balance",
           "accumulated_total",
           "level_expires_at",
@@ -1439,6 +1612,21 @@
         ],
         "title": "PurchaseRead"
       },
+      "RefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest"
+      },
       "RegisterRequest": {
         "properties": {
           "name": {
@@ -1553,7 +1741,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -1576,6 +1766,12 @@
         },
         "type": "object",
         "title": "UserUpdate"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }

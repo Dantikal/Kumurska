@@ -16,6 +16,7 @@
 [Команды](#-команды) •
 [Архитектура](#-архитектура) •
 [Формат ошибок](#-формат-ошибок) •
+[Документация](#-документация) •
 [Как участвовать](#-как-участвовать)
 
 </div>
@@ -138,6 +139,14 @@ flowchart LR
 ```python
 raise ApiError(400, "OTP_INVALID", "Неверный код")
 ```
+
+## 📚 Документация
+
+| Документ | О чём |
+|---|---|
+| [docs/auth-sessions.md](docs/auth-sessions.md) | сессии и токены для клиентов: `X-Device-Id`, refresh, logout, `SESSION_EXPIRED` |
+| [docs/data-model.md](docs/data-model.md) | модель данных |
+| [docs/openapi/openapi.json](docs/openapi/openapi.json) | контракт API (OpenAPI) |
 
 ## 🤝 Как участвовать
 
