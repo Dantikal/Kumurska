@@ -1,13 +1,17 @@
-# app/modules/loyalty/service.py
+import base64
+import json
 import uuid
 from datetime import UTC, datetime
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ApiError
+from app.core.schemas import Page
 from app.modules.loyalty import repository
-from app.modules.loyalty.models import BonusAccount
-from app.modules.loyalty.schemas import BonusAccountRead
+from app.modules.loyalty.models import BonusAccount, BonusTransaction
+from app.modules.loyalty.schemas import BonusAccountRead, BonusTransactionRead
+from app.modules.purchases import service as purchases_service
 
 
 async def open_account(session: AsyncSession, user_id: uuid.UUID) -> BonusAccount:
@@ -49,3 +53,90 @@ async def get_account(
         created_at=account.created_at,
         updated_at=account.updated_at,
     )
+
+
+def _encode_transaction_cursor(transaction: BonusTransaction) -> str:
+    payload = {
+        "created_at": transaction.created_at.isoformat(),
+        "id": str(transaction.id),
+    }
+    raw_cursor = json.dumps(payload, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw_cursor).decode()
+
+
+def _decode_transaction_cursor(cursor: str) -> tuple[datetime, UUID]:
+    try:
+        raw_cursor = base64.urlsafe_b64decode(cursor.encode())
+        payload = json.loads(raw_cursor.decode())
+        created_at = datetime.fromisoformat(payload["created_at"])
+        transaction_id = UUID(payload["id"])
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        raise ApiError(
+            422,
+            "INVALID_CURSOR",
+            "Некорректный курсор пагинации",
+        ) from None
+
+    return created_at, transaction_id
+
+
+async def list_transactions(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    cursor: str | None,
+    limit: int,
+) -> Page[BonusTransactionRead]:
+    cursor_created_at: datetime | None = None
+    cursor_id: UUID | None = None
+
+    if cursor is not None:
+        cursor_created_at, cursor_id = _decode_transaction_cursor(cursor)
+
+    transactions = await repository.list_transactions(
+        session,
+        user_id,
+        cursor_created_at,
+        cursor_id,
+        limit + 1,
+    )
+
+    has_next_page = len(transactions) > limit
+    visible_transactions = transactions[:limit]
+
+    purchase_ids = [
+        transaction.purchase_id
+        for transaction in visible_transactions
+        if transaction.purchase_id is not None
+    ]
+
+    purchase_amounts = await purchases_service.get_total_amounts_by_ids(
+        session,
+        purchase_ids,
+        user_id,
+    )
+
+    items = [
+        BonusTransactionRead(
+            id=transaction.id,
+            account_id=transaction.account_id,
+            purchase_id=transaction.purchase_id,
+            purchase_amount=(
+                purchase_amounts.get(transaction.purchase_id)
+                if transaction.purchase_id is not None
+                else None
+            ),
+            type=transaction.type.value,
+            amount=transaction.amount,
+            reason=transaction.reason,
+            status=transaction.status.value,
+            created_at=transaction.created_at,
+        )
+        for transaction in visible_transactions
+    ]
+
+    next_cursor = None
+    if has_next_page and visible_transactions:
+        next_cursor = _encode_transaction_cursor(visible_transactions[-1])
+
+    return Page(items=items, next_cursor=next_cursor)

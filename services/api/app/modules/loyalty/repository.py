@@ -2,10 +2,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.loyalty.models import AccountStatus, BonusAccount, LevelStatus, LoyaltyLevel
+from app.modules.loyalty.models import (
+    AccountStatus,
+    BonusAccount,
+    BonusTransaction,
+    LevelStatus,
+    LoyaltyLevel,
+    TransactionStatus,
+)
 
 
 async def get_entry_level(session: AsyncSession, now: datetime) -> LoyaltyLevel | None:
@@ -38,3 +45,43 @@ async def get_account_with_level(
 
     result = await session.execute(stmt)
     return result.one_or_none()
+
+
+async def list_transactions(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    cursor_created_at: datetime | None,
+    cursor_id: uuid.UUID | None,
+    limit: int,
+) -> list[BonusTransaction]:
+    stmt = (
+        select(BonusTransaction)
+        .join(
+            BonusAccount,
+            BonusAccount.id == BonusTransaction.account_id,
+        )
+        .where(
+            BonusAccount.user_id == user_id,
+            BonusAccount.status == AccountStatus.ACTIVE,
+            BonusTransaction.status == TransactionStatus.CONFIRMED,
+        )
+        .order_by(
+            desc(BonusTransaction.created_at),
+            desc(BonusTransaction.id),
+        )
+        .limit(limit)
+    )
+
+    if cursor_created_at is not None and cursor_id is not None:
+        stmt = stmt.where(
+            or_(
+                BonusTransaction.created_at < cursor_created_at,
+                and_(
+                    BonusTransaction.created_at == cursor_created_at,
+                    BonusTransaction.id < cursor_id,
+                ),
+            )
+        )
+
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
