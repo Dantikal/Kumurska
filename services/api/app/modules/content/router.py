@@ -16,13 +16,15 @@ router = APIRouter(prefix="/content", tags=["content"])
 @router.get(
     "/promotions",
     response_model=Page[PromotionRead],
-    responses={422: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
 )
 async def list_promotions(
     cursor: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
 ) -> Page[PromotionRead]:
-    raise ApiError(501, "NOT_IMPLEMENTED", "Метод ещё не реализован")
+    """Действующие опубликованные акции для главного экрана, начиная с самых новых."""
+    return await content_service.list_active_promotions(session=db, cursor=cursor, limit=limit)
 
 
 @router.get(

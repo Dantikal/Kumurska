@@ -728,6 +728,7 @@
           "content"
         ],
         "summary": "List Promotions",
+        "description": "Действующие опубликованные акции для главного экрана, начиная с самых новых.",
         "operationId": "list_promotions_api_v1_content_promotions_get",
         "parameters": [
           {
@@ -769,6 +770,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "422": {
             "content": {

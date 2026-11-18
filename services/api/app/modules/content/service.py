@@ -11,14 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ApiError
 from app.core.schemas import Page
 from app.modules.content import repository
-from app.modules.content.models import Event
-from app.modules.content.schemas import EventRead
+from app.modules.content.models import Event, Promotion
+from app.modules.content.schemas import EventRead, PromotionRead
 
 
-def encode_cursor(event: Event) -> str:
+def encode_cursor(item: Event | Promotion) -> str:
     cursor_data = {
-        "starts_at": event.starts_at.isoformat(),
-        "id": str(event.id),
+        "starts_at": item.starts_at.isoformat(),
+        "id": str(item.id),
     }
 
     cursor_json = json.dumps(cursor_data)
@@ -41,12 +41,14 @@ def decode_cursor(
             raise ValueError("Cursor must contain a JSON object")
 
         starts_at = datetime.fromisoformat(cursor_data["starts_at"])
-        event_id = UUID(cursor_data["id"])
+        if not isinstance(cursor_data["id"], str):
+            raise ValueError("Cursor id must be a UUID string")
+        item_id = UUID(cursor_data["id"])
 
         if starts_at.utcoffset() is None:
             raise ValueError("Cursor datetime must include timezone")
 
-        return starts_at, event_id
+        return starts_at, item_id
 
     except (ValueError, TypeError, KeyError, binascii.Error):
         raise ApiError(
@@ -54,6 +56,22 @@ def decode_cursor(
             "INVALID_CURSOR",
             "Некорректный курсор пагинации",
         ) from None
+
+
+async def list_active_promotions(
+    session: AsyncSession,
+    cursor: str | None,
+    limit: int,
+) -> Page[PromotionRead]:
+    decoded_cursor = decode_cursor(cursor) if cursor is not None else None
+    promotions = await repository.get_active_promotions(
+        session=session, now=datetime.now(UTC), limit=limit, cursor=decoded_cursor
+    )
+    items = promotions[:limit]
+    return Page[PromotionRead](
+        items=items,
+        next_cursor=encode_cursor(items[-1]) if len(promotions) > limit else None,
+    )
 
 
 async def list_upcoming_events(
