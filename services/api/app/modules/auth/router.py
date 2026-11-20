@@ -12,6 +12,8 @@ from app.modules.auth.schemas import (
     OtpResendRequest,
     OtpSentResponse,
     OtpVerifyRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
@@ -109,6 +111,81 @@ async def resend_otp(
 ) -> OtpSentResponse:
     """Отправляет новый код. Старый аннулируется, клиент использует новый verification_id."""
     return await service.resend(db, sms, payload.verification_id)
+
+
+@router.post(
+    "/password/reset",
+    response_model=OtpSentResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "VALIDATION_ERROR"},
+        429: {
+            "model": ErrorResponse,
+            "description": "OTP_RESEND_TOO_EARLY (заголовок Retry-After, details.retry_after)",
+        },
+    },
+)
+async def request_password_reset(
+    payload: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+    sms: SmsProvider = Depends(get_sms_provider),
+) -> OtpSentResponse:
+    """Отправляет SMS-код для восстановления пароля.
+
+    Ответ одинаковый для любого номера: зарегистрирован ли он, по ответу не узнать.
+    SMS уходит только активному пользователю.
+    """
+    return await service.request_password_reset(db, sms, payload.phone)
+
+
+@router.post(
+    "/password/reset/resend",
+    response_model=OtpSentResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "OTP_NOT_FOUND"},
+        422: {"model": ErrorResponse, "description": "VALIDATION_ERROR"},
+        429: {
+            "model": ErrorResponse,
+            "description": "OTP_RESEND_TOO_EARLY (заголовок Retry-After, details.retry_after)",
+        },
+    },
+)
+async def resend_password_reset(
+    payload: OtpResendRequest,
+    db: AsyncSession = Depends(get_db),
+    sms: SmsProvider = Depends(get_sms_provider),
+) -> OtpSentResponse:
+    """Отправляет новый код восстановления. Клиент использует новый verification_id."""
+    return await service.resend_password_reset(db, sms, payload.verification_id)
+
+
+@router.post(
+    "/password/reset/confirm",
+    response_model=TokenResponse,
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": (
+                "OTP_INVALID (details.attempts_left), OTP_EXPIRED, OTP_ATTEMPTS_EXCEEDED"
+            ),
+        },
+        403: {"model": ErrorResponse, "description": "USER_BLOCKED"},
+        404: {"model": ErrorResponse, "description": "OTP_NOT_FOUND"},
+        422: {"model": ErrorResponse, "description": "VALIDATION_ERROR"},
+    },
+)
+async def confirm_password_reset(
+    payload: PasswordResetConfirm,
+    db: AsyncSession = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+) -> TokenResponse:
+    """Проверяет код и задаёт новый пароль.
+
+    Все прежние сессии пользователя завершаются, на этом устройстве (X-Device-Id)
+    открывается новая и выдаются токены.
+    """
+    return await service.confirm_password_reset(
+        db, payload.verification_id, payload.code, payload.new_password, device_id
+    )
 
 
 @router.post(

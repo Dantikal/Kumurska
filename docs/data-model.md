@@ -117,7 +117,7 @@ UNIQUE `(source, external_id)`.
 | `status` | ENUM | `draft` / `published` / `unpublished` |
 | `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL |
 
-### `otp_codes` (US-03)
+### `otp_codes` (US-03, US-06)
 
 | Поле | Тип | Ограничения |
 |---|---|---|

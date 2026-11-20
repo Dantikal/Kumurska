@@ -1,5 +1,6 @@
 # app/modules/auth/service.py
-"""Регистрация (US-03), вход (US-04), сессии устройств и обновление токенов (US-25).
+"""Регистрация (US-03), вход (US-04), восстановление пароля (US-06),
+сессии устройств и обновление токенов (US-25).
 
 Коды, пароли и refresh-токены в открытом виде не логируются и не сохраняются:
 код живёт только в тексте SMS, в базе — HMAC; пароль — argon2-хеш; refresh — SHA-256.
@@ -97,6 +98,42 @@ def _code_matches(otp: OtpCode, code: str) -> bool:
     return hmac.compare_digest(otp.code_hash, hash_code(otp.id, code))
 
 
+_SMS_TEXT = {
+    OtpPurpose.REGISTER: "Kumurska: код подтверждения {code}. Никому его не сообщайте.",
+    OtpPurpose.RESET_PASSWORD: (
+        "Kumurska: код для восстановления пароля {code}. Никому его не сообщайте."
+    ),
+}
+
+
+async def _consume_otp(
+    db: AsyncSession, verification_id: uuid.UUID, purpose: OtpPurpose, code: str
+) -> OtpCode:
+    """Проверяет код и помечает его использованным (без коммита).
+
+    Неверный код увеличивает счётчик попыток и коммитится сразу, до ошибки.
+    """
+    # FOR UPDATE: параллельные попытки с одним verification_id выполняются по очереди.
+    otp = await repository.get_otp_for_update(db, verification_id, purpose)
+    if otp is None or otp.consumed_at is not None:
+        raise _otp_not_found()
+
+    now = datetime.now(UTC)
+    if now >= otp.expires_at:
+        raise ApiError(400, "OTP_EXPIRED", "Срок действия кода истёк")
+    if otp.attempts >= settings.otp_max_attempts:
+        raise ApiError(400, "OTP_ATTEMPTS_EXCEEDED", "Превышено число попыток, запросите новый код")
+
+    if not _code_matches(otp, code):
+        otp.attempts += 1
+        attempts_left = max(0, settings.otp_max_attempts - otp.attempts)
+        await db.commit()
+        raise ApiError(400, "OTP_INVALID", "Неверный код", {"attempts_left": attempts_left})
+
+    otp.consumed_at = now
+    return otp
+
+
 async def _create_and_send(
     db: AsyncSession,
     sms: SmsProvider,
@@ -105,8 +142,12 @@ async def _create_and_send(
     purpose: OtpPurpose,
     payload: dict | None,
     now: datetime,
+    send_sms: bool = True,
 ) -> OtpSentResponse:
-    """Аннулирует прежние коды номера, создаёт новый, отправляет SMS и коммитит."""
+    """Аннулирует прежние коды номера, создаёт новый, отправляет SMS и коммитит.
+
+    send_sms=False создаёт такую же запись без SMS: ответ клиенту не отличается.
+    """
     await repository.consume_active_otps(db, phone, purpose, now)
 
     code = generate_code()
@@ -126,7 +167,8 @@ async def _create_and_send(
     )
     await db.flush()
     # Если отправка упадёт, транзакция откатится и запись не останется висеть.
-    await sms.send(phone, f"Kumurska: код подтверждения {code}. Никому его не сообщайте.")
+    if send_sms:
+        await sms.send(phone, _SMS_TEXT[purpose].format(code=code))
     await db.commit()
 
     return OtpSentResponse(
@@ -219,24 +261,7 @@ async def login(db: AsyncSession, phone: str, password: str, device_id: str) -> 
 async def verify(
     db: AsyncSession, verification_id: uuid.UUID, code: str, device_id: str
 ) -> TokenResponse:
-    # FOR UPDATE: параллельные попытки с одним verification_id выполняются по очереди.
-    otp = await repository.get_otp_for_update(db, verification_id, OtpPurpose.REGISTER)
-    if otp is None or otp.consumed_at is not None:
-        raise _otp_not_found()
-
-    now = datetime.now(UTC)
-    if now >= otp.expires_at:
-        raise ApiError(400, "OTP_EXPIRED", "Срок действия кода истёк")
-    if otp.attempts >= settings.otp_max_attempts:
-        raise ApiError(400, "OTP_ATTEMPTS_EXCEEDED", "Превышено число попыток, запросите новый код")
-
-    if not _code_matches(otp, code):
-        otp.attempts += 1
-        attempts_left = max(0, settings.otp_max_attempts - otp.attempts)
-        await db.commit()
-        raise ApiError(400, "OTP_INVALID", "Неверный код", {"attempts_left": attempts_left})
-
-    otp.consumed_at = now
+    otp = await _consume_otp(db, verification_id, OtpPurpose.REGISTER, code)
     payload = otp.payload or {}
     try:
         async with db.begin_nested():
@@ -253,6 +278,87 @@ async def verify(
         raise _phone_already_registered() from None
 
     await loyalty_service.open_account(db, user.id)
+    tokens = await issue_tokens(db, user.id, device_id)
+    await db.commit()
+    return _token_response(tokens)
+
+
+# --- восстановление пароля (US-06) ------------------------------------------------
+#
+# Ответы не выдают, зарегистрирован ли номер (как и вход, US-04): для неизвестного
+# или заблокированного номера создаётся такая же запись кода, но SMS не уходит.
+# Подобрать такой код за отведённые попытки практически невозможно.
+
+
+async def _can_reset_password(db: AsyncSession, phone: str) -> bool:
+    user = await users_service.get_by_phone(db, phone)
+    return user is not None and user.status == UserStatus.ACTIVE
+
+
+async def request_password_reset(db: AsyncSession, sms: SmsProvider, phone: str) -> OtpSentResponse:
+    now = datetime.now(UTC)
+    # Повторный запрос не должен обходить таймер повторной отправки.
+    active = await repository.get_latest_active_otp(db, phone, OtpPurpose.RESET_PASSWORD)
+    if active is not None and active.resend_at > now:
+        raise _resend_too_early(now, active.resend_at)
+
+    return await _create_and_send(
+        db,
+        sms,
+        phone=phone,
+        purpose=OtpPurpose.RESET_PASSWORD,
+        payload=None,
+        now=now,
+        send_sms=await _can_reset_password(db, phone),
+    )
+
+
+async def resend_password_reset(
+    db: AsyncSession, sms: SmsProvider, verification_id: uuid.UUID
+) -> OtpSentResponse:
+    otp = await repository.get_otp_for_update(db, verification_id, OtpPurpose.RESET_PASSWORD)
+    if otp is None or otp.consumed_at is not None:
+        raise _otp_not_found()
+
+    now = datetime.now(UTC)
+    if now < otp.resend_at:
+        raise _resend_too_early(now, otp.resend_at)
+
+    return await _create_and_send(
+        db,
+        sms,
+        phone=otp.phone,
+        purpose=OtpPurpose.RESET_PASSWORD,
+        payload=None,
+        now=now,
+        send_sms=await _can_reset_password(db, otp.phone),
+    )
+
+
+async def confirm_password_reset(
+    db: AsyncSession,
+    verification_id: uuid.UUID,
+    code: str,
+    new_password: str,
+    device_id: str,
+) -> TokenResponse:
+    """Проверяет код, меняет пароль, завершает все сессии и открывает новую на этом устройстве.
+
+    Остальные устройства разлогиниваются: восстановление часто означает, что доступ
+    к аккаунту мог получить кто-то другой.
+    """
+    otp = await _consume_otp(db, verification_id, OtpPurpose.RESET_PASSWORD, code)
+
+    user = await users_service.get_by_phone(db, otp.phone)
+    if user is None:
+        await db.commit()  # код всё равно считаем использованным
+        raise _otp_not_found()
+    if user.status != UserStatus.ACTIVE:
+        await db.commit()
+        raise _user_blocked()
+
+    user.password_hash = await to_thread.run_sync(_password_hasher.hash, new_password)
+    await repository.revoke_user_sessions(db, user.id, otp.consumed_at)
     tokens = await issue_tokens(db, user.id, device_id)
     await db.commit()
     return _token_response(tokens)

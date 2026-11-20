@@ -3,11 +3,30 @@ from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+)
 
 from app.core.phone import normalize_phone
 
 Phone = Annotated[str, AfterValidator(normalize_phone)]
+
+
+def check_password_strength(value: str) -> str:
+    """Правила сложности пароля: 8–128 символов (через Field), хотя бы одна буква и одна цифра."""
+    if not any(ch.isalpha() for ch in value) or not any(ch.isdigit() for ch in value):
+        raise ValueError("Пароль должен содержать хотя бы одну букву и одну цифру")
+    return value
+
+
+NewPassword = Annotated[
+    str, Field(min_length=8, max_length=128), AfterValidator(check_password_strength)
+]
 
 
 class RegisterRequest(BaseModel):
@@ -15,7 +34,7 @@ class RegisterRequest(BaseModel):
     phone: Phone
     birth_date: date
     # Необязателен, пока не решено, остаётся ли вход по паролю (US-02)
-    password: Annotated[str | None, Field(min_length=8, max_length=128)] = None
+    password: NewPassword | None = None
     accepted_terms: bool
 
     @field_validator("birth_date")
@@ -47,6 +66,25 @@ class OtpVerifyRequest(BaseModel):
 
 class OtpResendRequest(BaseModel):
     verification_id: UUID
+
+
+class PasswordResetRequest(BaseModel):
+    phone: Phone
+
+
+class PasswordResetConfirm(BaseModel):
+    verification_id: UUID
+    code: Annotated[str, StringConstraints(pattern=r"^\d{1,10}$")]
+    new_password: NewPassword
+    new_password_confirm: str
+
+    @field_validator("new_password_confirm")
+    @classmethod
+    def _passwords_match(cls, value: str, info: ValidationInfo) -> str:
+        # Если new_password не прошёл проверку, его нет в info.data: ошибка уже будет там.
+        if "new_password" in info.data and value != info.data["new_password"]:
+            raise ValueError("Пароли не совпадают")
+        return value
 
 
 class OtpSentResponse(BaseModel):
