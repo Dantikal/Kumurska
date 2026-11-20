@@ -102,10 +102,20 @@
   // Поля API, которые в форме называются иначе.
   const FORM_FIELDS = { birth_date: 'birth', accepted_terms: 'agree' };
 
+  // UUID устройства для заголовка X-Device-Id: создаётся один раз и хранится в браузере.
+  function deviceId() {
+    let id = localStorage.getItem('kumurska_device_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('kumurska_device_id', id);
+    }
+    return id;
+  }
+
   async function postJson(url, data) {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Device-Id': deviceId() },
       body: JSON.stringify(data),
     }).catch(() => { throw new Error('Нет связи с сервером'); });
     return { ok: res.ok, body: await res.json().catch(() => ({})) };
