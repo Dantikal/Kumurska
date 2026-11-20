@@ -1,13 +1,23 @@
-"""Бизнес-логика и транзакции."""
-
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ApiError
-from app.modules.loyalty import service as loyalty_service
 from app.modules.purchases import repository
 from app.modules.purchases.schemas import PurchaseRead
+
+
+async def get_total_amounts_by_ids(
+    session: AsyncSession,
+    purchase_ids: list[UUID],
+    user_id: UUID,
+) -> dict[UUID, Decimal]:
+    return await repository.get_total_amounts_by_ids(
+        session,
+        purchase_ids,
+        user_id,
+    )
 
 
 async def get_purchase_details(
@@ -15,6 +25,8 @@ async def get_purchase_details(
     purchase_id: UUID,
     user_id: UUID,
 ) -> PurchaseRead:
+    from app.modules.loyalty import service as loyalty_service
+
     purchase = await repository.get_purchase(
         session,
         purchase_id,

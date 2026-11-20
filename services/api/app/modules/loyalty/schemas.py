@@ -39,6 +39,7 @@ class BonusTransactionRead(BaseModel):
     id: UUID
     account_id: UUID
     purchase_id: UUID | None
+    purchase_amount: Decimal | None
     type: str
     amount: int
     reason: str | None

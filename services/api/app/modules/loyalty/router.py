@@ -48,5 +48,12 @@ async def list_levels(
 async def list_transactions(
     cursor: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Page[BonusTransactionRead]:
-    raise ApiError(501, "NOT_IMPLEMENTED", "Метод ещё не реализован")
+    return await loyalty_service.list_transactions(
+        db,
+        current_user.id,
+        cursor=cursor,
+        limit=limit,
+    )
