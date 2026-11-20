@@ -20,6 +20,9 @@
   .agree { font-size: 14px; }
   #submit, #code-submit { width: 100%; padding: 13px; border: 0; border-radius: 8px; background: #1a73e8; color: #fff; font: inherit; cursor: pointer; }
   #submit:disabled, #code-submit:disabled { background: #c5c9d0; cursor: not-allowed; }
+  .links { display: flex; justify-content: space-between; gap: 12px; }
+  .link { padding: 0; border: 0; background: none; color: #1a73e8; font: inherit; font-size: 14px; cursor: pointer; }
+  .link:disabled { color: #888; cursor: default; }
 </style>
 </head>
 <body>
@@ -84,6 +87,10 @@
     </div>
     <button id="code-submit" disabled>Подтвердить</button>
   </form>
+  <p class="links">
+    <button type="button" id="resend" class="link" disabled>Отправить код повторно</button>
+    <button type="button" id="change-phone" class="link">Изменить данные</button>
+  </p>
 </section>
 
 <section id="done-screen" hidden>
@@ -132,14 +139,19 @@
   const serverErrors = {};
   let submitting = false;
 
-  // Возвращает "гггг-мм-дд" для реальной даты из прошлого, иначе null.
+  function today() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
+  // Возвращает "гггг-мм-дд" для реальной даты строго до сегодняшнего дня (как проверяет API), иначе null.
   function parseDate(value) {
     const m = value.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
     if (!m) return null;
     const [, d, mo, y] = m.map(Number);
     const date = new Date(y, mo - 1, d);
     const real = date.getFullYear() === y && date.getMonth() === mo - 1 && date.getDate() === d;
-    return real && y >= 1900 && date <= new Date() ? `${m[3]}-${m[2]}-${m[1]}` : null;
+    return real && y >= 1900 && date < today() ? `${m[3]}-${m[2]}-${m[1]}` : null;
   }
 
   const rules = {
@@ -188,8 +200,18 @@
     input.type = input.type === 'password' ? 'text' : 'password';
   }));
 
-  $('picker').max = new Date().toLocaleDateString('sv');
-  $('calendar').addEventListener('click', () => $('picker').showPicker());
+  const yesterday = today();
+  yesterday.setDate(yesterday.getDate() - 1);
+  $('picker').min = '1900-01-01';
+  $('picker').max = yesterday.toLocaleDateString('sv');
+  $('calendar').addEventListener('click', () => {
+    // showPicker() нет в Safari < 16 и старых браузерах: тогда оставляем ручной ввод.
+    try {
+      $('picker').showPicker();
+    } catch {
+      $('birth').focus();
+    }
+  });
   $('picker').addEventListener('change', e => {
     if (!e.target.value) return;
     $('birth').value = e.target.value.split('-').reverse().join('.');
@@ -218,12 +240,7 @@
         password: $('password').value,
         accepted_terms: $('agree').checked,
       });
-      // US-03: verification_id нужен для POST /api/v1/auth/otp/verify.
-      $('code-screen').dataset.verificationId = sent.verification_id;
-      $('code-phone').textContent = sent.phone_masked;
-      $('form').hidden = true;
-      $('code-screen').hidden = false;
-      $('code').focus();
+      showCodeScreen(sent);
     } catch (err) {
       if (err.field) {
         serverErrors[err.field] = err.message;
@@ -237,10 +254,70 @@
     }
   });
 
+  // --- экран кода -----------------------------------------------------------
+
+  let resendTimer = null;
+
+  function startResendCountdown(seconds) {
+    clearInterval(resendTimer);
+    let left = Math.max(0, Math.ceil(seconds));
+    const tick = () => {
+      $('resend').disabled = left > 0;
+      $('resend').textContent = left > 0 ? `Отправить код повторно через ${left} с` : 'Отправить код повторно';
+      if (left-- <= 0) clearInterval(resendTimer);
+    };
+    tick();
+    resendTimer = setInterval(tick, 1000);
+  }
+
+  function showCodeError(message) {
+    $('code-error').textContent = message;
+    $('code').closest('.box').classList.toggle('invalid', !!message);
+  }
+
+  function showCodeScreen(sent) {
+    // US-03: verification_id нужен для POST /api/v1/auth/otp/verify и /otp/resend.
+    $('code-screen').dataset.verificationId = sent.verification_id;
+    $('code-phone').textContent = sent.phone_masked;
+    $('code').value = '';
+    $('code-submit').disabled = true;
+    showCodeError('');
+    startResendCountdown(sent.resend_in);
+    $('form').hidden = true;
+    $('code-screen').hidden = false;
+    $('code').focus();
+  }
+
+  $('resend').addEventListener('click', async () => {
+    $('resend').disabled = true;
+    try {
+      const { ok, body } = await postJson('/api/v1/auth/otp/resend', {
+        verification_id: $('code-screen').dataset.verificationId,
+      });
+      if (ok) {
+        showCodeScreen(body);
+        return;
+      }
+      const { code, message = 'Не удалось отправить код', details = {} } = body.error || {};
+      showCodeError(message);
+      // Слишком рано: ждём столько, сколько сказал сервер. Иначе кнопку можно нажать снова.
+      startResendCountdown(code === 'OTP_RESEND_TOO_EARLY' ? details.retry_after || 0 : 0);
+    } catch (err) {
+      showCodeError(err.message);
+      startResendCountdown(0);
+    }
+  });
+
+  $('change-phone').addEventListener('click', () => {
+    clearInterval(resendTimer);
+    $('code-screen').hidden = true;
+    $('form').hidden = false;
+    $('phone').focus();
+  });
+
   $('code').addEventListener('input', e => {
     e.target.value = digits(e.target.value);
-    $('code-error').textContent = '';
-    $('code').closest('.box').classList.remove('invalid');
+    showCodeError('');
     $('code-submit').disabled = !e.target.value;
   });
 
@@ -249,11 +326,11 @@
     $('code-submit').disabled = true;
     try {
       await verifyCode($('code-screen').dataset.verificationId, $('code').value);
+      clearInterval(resendTimer);
       $('code-screen').hidden = true;
       $('done-screen').hidden = false;
     } catch (err) {
-      $('code-error').textContent = err.message;
-      $('code').closest('.box').classList.add('invalid');
+      showCodeError(err.message);
       $('code-submit').disabled = false;
     }
   });
