@@ -2,7 +2,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -13,6 +13,16 @@ class ContentStatus(StrEnum):
     DRAFT = "draft"
     PUBLISHED = "published"
     UNPUBLISHED = "unpublished"
+
+
+class LegalDocumentType(StrEnum):
+    TERMS = "terms"
+    PRIVACY = "privacy"
+
+
+class LegalDocumentStatus(StrEnum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
 
 
 class Promotion(IdMixin, TimestampMixin, Base):
@@ -38,4 +48,22 @@ class Event(IdMixin, TimestampMixin, Base):
     is_period: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[ContentStatus] = mapped_column(
         enum_column(ContentStatus), default=ContentStatus.DRAFT
+    )
+
+
+class LegalDocument(IdMixin, Base):
+    __tablename__ = "legal_documents"
+    __table_args__ = (UniqueConstraint("type", "version", name="uq_legal_documents_type_version"),)
+
+    type: Mapped[LegalDocumentType] = mapped_column(enum_column(LegalDocumentType))
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[LegalDocumentStatus] = mapped_column(
+        enum_column(LegalDocumentStatus),
+        default=LegalDocumentStatus.DRAFT,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
