@@ -6,7 +6,13 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.content.models import ContentStatus, Event
+from app.modules.content.models import (
+    ContentStatus,
+    Event,
+    LegalDocument,
+    LegalDocumentStatus,
+    LegalDocumentType,
+)
 
 
 async def get_upcoming_events(
@@ -44,3 +50,20 @@ async def get_upcoming_events(
     result = await session.scalars(query)
 
     return list(result.all())
+
+
+async def get_latest_published_document(
+    session: AsyncSession,
+    document_type: LegalDocumentType,
+) -> LegalDocument | None:
+    query = (
+        select(LegalDocument)
+        .where(
+            LegalDocument.type == document_type,
+            LegalDocument.status == LegalDocumentStatus.PUBLISHED,
+        )
+        .order_by(LegalDocument.version.desc())
+        .limit(1)
+    )
+
+    return await session.scalar(query)

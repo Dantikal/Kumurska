@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ApiError
 from app.core.schemas import Page
 from app.modules.content import repository
-from app.modules.content.models import Event
-from app.modules.content.schemas import EventRead
+from app.modules.content.models import Event, LegalDocumentType
+from app.modules.content.schemas import EventRead, LegalDocumentRead
 
 
 def encode_cursor(event: Event) -> str:
@@ -81,3 +81,22 @@ async def list_upcoming_events(
         items=items,
         next_cursor=next_cursor,
     )
+
+
+async def get_legal_document(
+    session: AsyncSession,
+    document_type: LegalDocumentType,
+) -> LegalDocumentRead:
+    document = await repository.get_latest_published_document(
+        session=session,
+        document_type=document_type,
+    )
+
+    if document is None:
+        raise ApiError(
+            404,
+            "DOCUMENT_NOT_FOUND",
+            "Опубликованный документ не найден",
+        )
+
+    return LegalDocumentRead.model_validate(document)

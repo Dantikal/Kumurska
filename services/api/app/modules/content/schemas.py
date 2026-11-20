@@ -31,3 +31,15 @@ class EventRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class LegalDocumentRead(BaseModel):
+    id: UUID
+    type: str
+    version: int
+    title: str
+    content: str
+    status: str
+    published_at: datetime | None
+
+    model_config = {"from_attributes": True}
