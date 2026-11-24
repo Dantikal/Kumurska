@@ -116,7 +116,7 @@ def _decode_transaction_cursor(cursor: str) -> tuple[datetime, UUID]:
         json.JSONDecodeError,
     ):
         raise ApiError(
-            422,
+            400,
             "INVALID_CURSOR",
             "Некорректный курсор пагинации",
         ) from None

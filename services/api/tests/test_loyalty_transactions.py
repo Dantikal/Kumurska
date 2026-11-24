@@ -82,6 +82,36 @@ async def test_list_my_bonus_transactions_with_pagination(
             created_at=datetime(2026, 1, 2, 13, 0, tzinfo=UTC),
         )
         session.add_all([older_transaction, newer_transaction])
+
+        other_user = User(
+            phone="+996700000021",
+            name="Other User",
+            birth_date=datetime(1994, 1, 1).date(),
+            password_hash=None,
+        )
+        session.add(other_user)
+        await session.flush()
+
+        other_account = BonusAccount(
+            user_id=other_user.id,
+            level_id=entry_level.id,
+            balance=999,
+            accumulated_total=Decimal("9999.00"),
+        )
+        session.add(other_account)
+        await session.flush()
+
+        session.add(
+            BonusTransaction(
+                account_id=other_account.id,
+                purchase_id=None,
+                type=TransactionType.ACCRUAL,
+                amount=999,
+                reason="Other user transaction",
+                status=TransactionStatus.CONFIRMED,
+                created_at=datetime(2026, 1, 3, 13, 0, tzinfo=UTC),
+            )
+        )
         await session.commit()
 
     async def override_get_current_user() -> User:
@@ -118,5 +148,24 @@ async def test_list_my_bonus_transactions_with_pagination(
         assert second_page["items"][0]["type"] == "accrual"
         assert second_page["items"][0]["purchase_amount"] == "1000.00"
         assert second_page["next_cursor"] is None
+
+        invalid_cursor_response = await api.get(
+            "/api/v1/loyalty/transactions",
+            params={"cursor": "invalid-cursor"},
+        )
+
+        assert invalid_cursor_response.status_code == 400
+        assert invalid_cursor_response.json()["error"]["code"] == "INVALID_CURSOR"
+
+        visible_items = first_page["items"] + second_page["items"]
+        assert all(item["account_id"] != str(other_account.id) for item in visible_items)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.anyio
+async def test_list_transactions_requires_auth(api):
+    response = await api.get("/api/v1/loyalty/transactions")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "NOT_AUTHENTICATED"
