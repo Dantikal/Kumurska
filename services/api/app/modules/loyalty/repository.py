@@ -65,3 +65,39 @@ async def get_account_with_level(
 
     result = await session.execute(stmt)
     return result.one_or_none()
+
+
+async def get_account_for_update(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+) -> tuple[BonusAccount, LoyaltyLevel] | None:
+    stmt = (
+        select(BonusAccount, LoyaltyLevel)
+        .join(LoyaltyLevel, LoyaltyLevel.id == BonusAccount.level_id)
+        .where(
+            BonusAccount.user_id == user_id,
+            BonusAccount.status == AccountStatus.ACTIVE,
+        )
+        .with_for_update(of=BonusAccount)
+    )
+
+    result = await session.execute(stmt)
+    return result.one_or_none()
+
+
+async def get_level_for_purchase(
+    session: AsyncSession,
+    threshold,
+    purchased_at: datetime,
+) -> LoyaltyLevel | None:
+    stmt = (
+        select(LoyaltyLevel)
+        .where(
+            LoyaltyLevel.threshold == threshold,
+            LoyaltyLevel.effective_from <= purchased_at,
+        )
+        .order_by(LoyaltyLevel.effective_from.desc())
+        .limit(1)
+    )
+
+    return (await session.execute(stmt)).scalar_one_or_none()

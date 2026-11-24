@@ -5,7 +5,9 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ApiError
 from app.modules.auth.dependencies import get_current_user
+from app.modules.loyalty import service as loyalty_service
 from app.modules.loyalty.models import (
     BonusAccount,
     BonusTransaction,
@@ -13,7 +15,10 @@ from app.modules.loyalty.models import (
     TransactionStatus,
     TransactionType,
 )
+from app.modules.purchases import repository
 from app.modules.purchases.models import Purchase, PurchaseItem, PurchaseStatus
+from app.modules.purchases.schemas import PurchaseCreate
+from app.modules.purchases.service import confirm_purchase, record_purchase
 from app.modules.users.models import User
 
 
@@ -470,3 +475,218 @@ async def test_purchase_ignores_another_users_bonus_transactions(
 
     assert data["points_redeemed"] == 300
     assert data["cashback_earned"] == 109
+
+
+@pytest.mark.anyio
+async def test_confirm_purchase_applies_loyalty_rewards(session_factory):
+    async with session_factory() as session:
+        user = await create_user(session, "+996700000120")
+
+        level = LoyaltyLevel(
+            name="Тестовый уровень",
+            cashback_percent=Decimal("5.00"),
+            threshold=Decimal("0"),
+            effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        session.add(level)
+        await session.flush()
+
+        account = BonusAccount(
+            user_id=user.id,
+            level_id=level.id,
+            balance=500,
+            accumulated_total=Decimal("0"),
+        )
+        session.add(account)
+
+        purchase = Purchase(
+            user_id=user.id,
+            source="test",
+            external_id=str(uuid4()),
+            receipt_number="004520",
+            total_amount=Decimal("2480.00"),
+            paid_amount=Decimal("2180.00"),
+            points_to_redeem=300,
+            purchased_at=datetime(2026, 10, 12, 18, 5, tzinfo=UTC),
+            status=PurchaseStatus.PENDING,
+        )
+        session.add(purchase)
+        await session.flush()
+
+        await confirm_purchase(session, purchase.id)
+
+        assert purchase.status == PurchaseStatus.CONFIRMED
+        assert account.balance == 309
+        assert account.accumulated_total == Decimal("2180.00")
+
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_confirm_purchase_twice_does_not_duplicate_rewards(session_factory):
+    async with session_factory() as session:
+        user = await create_user(session, "+996700000121")
+
+        level = LoyaltyLevel(
+            name="Тестовый уровень",
+            cashback_percent=Decimal("5.00"),
+            threshold=Decimal("0"),
+            effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        session.add(level)
+        await session.flush()
+
+        account = BonusAccount(
+            user_id=user.id,
+            level_id=level.id,
+            balance=500,
+            accumulated_total=Decimal("0"),
+        )
+        session.add(account)
+
+        purchase = Purchase(
+            user_id=user.id,
+            source="test",
+            external_id=str(uuid4()),
+            total_amount=Decimal("2480.00"),
+            paid_amount=Decimal("2180.00"),
+            points_to_redeem=300,
+            purchased_at=datetime(2026, 10, 12, 18, 5, tzinfo=UTC),
+            status=PurchaseStatus.PENDING,
+        )
+        session.add(purchase)
+        await session.flush()
+
+        await confirm_purchase(session, purchase.id)
+        await confirm_purchase(session, purchase.id)
+
+        assert account.balance == 309
+        assert account.accumulated_total == Decimal("2180.00")
+
+        transactions = await loyalty_service.repository.get_purchase_transactions(
+            session,
+            purchase.id,
+            user.id,
+        )
+
+        assert len(transactions) == 2
+
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_refunded_purchase_cannot_be_confirmed(session_factory):
+    async with session_factory() as session:
+        user = await create_user(session, "+996700000122")
+
+        level = LoyaltyLevel(
+            name="Тестовый уровень",
+            cashback_percent=Decimal("5.00"),
+            threshold=Decimal("0"),
+            effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        session.add(level)
+        await session.flush()
+
+        account = BonusAccount(
+            user_id=user.id,
+            level_id=level.id,
+            balance=500,
+            accumulated_total=Decimal("0"),
+        )
+        session.add(account)
+
+        purchase = Purchase(
+            user_id=user.id,
+            source="test",
+            external_id=str(uuid4()),
+            total_amount=Decimal("1000.00"),
+            paid_amount=Decimal("1000.00"),
+            points_to_redeem=0,
+            purchased_at=datetime(2026, 10, 12, tzinfo=UTC),
+            status=PurchaseStatus.REFUNDED,
+        )
+        session.add(purchase)
+        await session.flush()
+
+        with pytest.raises(ApiError) as exc_info:
+            await confirm_purchase(session, purchase.id)
+
+        assert exc_info.value.code == "PURCHASE_CANNOT_BE_CONFIRMED"
+        assert account.balance == 500
+        assert account.accumulated_total == Decimal("0")
+
+        await session.rollback()
+
+
+@pytest.mark.anyio
+async def test_record_purchase_creates_pending_purchase(session_factory):
+    async with session_factory() as session:
+        user = await create_user(session, "+996700000123")
+
+        data = PurchaseCreate(
+            source="test",
+            external_id="external-001",
+            user_id=user.id,
+            items=[
+                {
+                    "name": "Тестовый товар",
+                    "quantity": 2,
+                    "unit_price": Decimal("500.00"),
+                    "line_total": Decimal("1000.00"),
+                }
+            ],
+            total_amount=Decimal("1000.00"),
+            paid_amount=Decimal("1000.00"),
+            purchased_at=datetime(2026, 10, 12, tzinfo=UTC),
+        )
+
+        purchase = await record_purchase(session, data)
+
+        assert purchase.status == PurchaseStatus.PENDING
+        assert purchase.source == "test"
+        assert purchase.external_id == "external-001"
+        assert purchase.points_to_redeem == 0
+
+        items = await repository.get_purchase_items(session, purchase.id)
+
+        assert len(items) == 1
+        assert items[0].name == "Тестовый товар"
+
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_record_purchase_does_not_create_duplicate(session_factory):
+    async with session_factory() as session:
+        user = await create_user(session, "+996700000124")
+
+        data = PurchaseCreate(
+            source="test",
+            external_id="external-duplicate-001",
+            user_id=user.id,
+            items=[
+                {
+                    "name": "Тестовый товар",
+                    "quantity": 1,
+                    "unit_price": Decimal("1000.00"),
+                    "line_total": Decimal("1000.00"),
+                }
+            ],
+            total_amount=Decimal("1000.00"),
+            paid_amount=Decimal("1000.00"),
+            purchased_at=datetime(2026, 10, 12, tzinfo=UTC),
+        )
+
+        first_purchase = await record_purchase(session, data)
+        second_purchase = await record_purchase(session, data)
+
+        assert first_purchase.id == second_purchase.id
+
+        items = await repository.get_purchase_items(
+            session,
+            first_purchase.id,
+        )
+        assert len(items) == 1
+
+        await session.commit()
