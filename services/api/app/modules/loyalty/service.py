@@ -123,9 +123,7 @@ async def apply_purchase_rewards(
             "Не найден уровень лояльности на дату покупки",
         )
 
-    cashback_earned = int(
-        paid_amount * level.cashback_percent / Decimal("100")
-    )
+    cashback_earned = int(paid_amount * level.cashback_percent / Decimal("100"))
 
     if points_to_redeem > 0:
         redemption = BonusTransaction(

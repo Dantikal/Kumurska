@@ -39,11 +39,7 @@ async def get_purchase_for_update(
     session: AsyncSession,
     purchase_id: UUID,
 ) -> Purchase | None:
-    stmt = (
-        select(Purchase)
-        .where(Purchase.id == purchase_id)
-        .with_for_update()
-    )
+    stmt = select(Purchase).where(Purchase.id == purchase_id).with_for_update()
     return (await session.execute(stmt)).scalar_one_or_none()
 
 

@@ -692,7 +692,6 @@ async def test_record_purchase_does_not_create_duplicate(session_factory):
         await session.commit()
 
 
-
 @pytest.mark.anyio
 async def test_cashback_rounds_down_to_integer(session_factory):
     async with session_factory() as session:
@@ -744,7 +743,6 @@ async def test_cashback_rounds_down_to_integer(session_factory):
         assert transactions[0].amount == 9
 
         await session.commit()
-
 
 
 @pytest.mark.anyio
@@ -804,7 +802,6 @@ async def test_cashback_uses_level_version_valid_on_purchase_date(session_factor
         await session.commit()
 
 
-
 @pytest.mark.anyio
 async def test_purchase_with_redemption_and_zero_cashback(session_factory):
     async with session_factory() as session:
@@ -859,7 +856,6 @@ async def test_purchase_with_redemption_and_zero_cashback(session_factory):
         await session.commit()
 
 
-
 @pytest.mark.anyio
 async def test_confirm_purchase_without_bonus_account(session_factory):
     async with session_factory() as session:
@@ -885,7 +881,6 @@ async def test_confirm_purchase_without_bonus_account(session_factory):
         assert purchase.status == PurchaseStatus.PENDING
 
         await session.rollback()
-
 
 
 @pytest.mark.anyio
@@ -948,7 +943,6 @@ async def test_failed_rewards_do_not_confirm_purchase(
         assert account.accumulated_total == Decimal("0")
 
         await session.rollback()
-
 
 
 @pytest.mark.anyio
@@ -1036,7 +1030,6 @@ async def test_database_rollback_after_rewards_failure(
         assert transactions == []
 
         await session.commit()
-
 
 
 @pytest.mark.anyio
