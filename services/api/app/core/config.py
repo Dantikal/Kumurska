@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     # "fake" — только для dev и test; реальные провайдеры подключаются отдельной задачей
     sms_provider: str = "fake"
 
+    # Хранилище изображений (US-17): S3-совместимое, в dev — MinIO из docker-compose.yml
+    s3_endpoint_url: str | None = "http://localhost:9010"
+    s3_region: str = "us-east-1"
+    s3_access_key: str = "kumurska"
+    s3_secret_key: str = "kumurska-dev-secret"
+    s3_bucket: str = "kumurska-content"
+    # Публичный адрес бакета: из него собирается image_url
+    s3_public_url: str = "http://localhost:9010/kumurska-content"
+
 
 def ensure_prod_secrets(config: Settings) -> None:
     """В prod секреты обязаны прийти из окружения. Значения в ошибку не попадают."""

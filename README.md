@@ -55,7 +55,7 @@ kumurska/
 > Нужны **Python 3.12** и **Docker**.
 
 ```bash
-# 1. Поднять PostgreSQL и Redis (из корня репозитория)
+# 1. Поднять PostgreSQL, Redis и MinIO (из корня репозитория)
 docker compose up -d
 
 # 2. Установить зависимости
@@ -76,6 +76,7 @@ uvicorn app.main:app --reload
 
 - 📖 документация API — <http://localhost:8000/docs>
 - ❤️ проверка работы — <http://localhost:8000/health>
+- 🖼 консоль MinIO (изображения акций и событий) — <http://localhost:9011>, логин `kumurska` / `kumurska-dev-secret`
 
 ## ⌨️ Команды
 
@@ -88,6 +89,7 @@ uvicorn app.main:app --reload
 | `ruff format .` | форматирует код |
 | `alembic revision --autogenerate -m "описание"` | создаёт миграцию |
 | `alembic upgrade head` | применяет миграции |
+| `uv run python scripts/export_openapi.py` | перегенерирует `docs/openapi/openapi.json` |
 
 ### Тестовые юридические документы
 
@@ -158,6 +160,7 @@ raise ApiError(400, "OTP_INVALID", "Неверный код")
 |---|---|
 | [docs/auth-sessions.md](docs/auth-sessions.md) | сессии и токены для клиентов: `X-Device-Id`, refresh, logout, `SESSION_EXPIRED` |
 | [docs/data-model.md](docs/data-model.md) | модель данных |
+| [docs/admin-content-api.md](docs/admin-content-api.md) | админские методы акций и событий для команды админки (US-17) |
 | [docs/openapi/openapi.json](docs/openapi/openapi.json) | контракт API (OpenAPI) |
 
 ## 🤝 Как участвовать
