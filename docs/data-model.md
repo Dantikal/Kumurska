@@ -99,10 +99,12 @@ UNIQUE `(source, external_id)`.
 | `title` | VARCHAR(255) | NOT NULL |
 | `description` | TEXT | NULL (US-9 — только при наличии) |
 | `image_url` | VARCHAR(500) | NULL |
-| `starts_at` | TIMESTAMPTZ | NOT NULL |
-| `ends_at` | TIMESTAMPTZ | NOT NULL |
+| `starts_at` | TIMESTAMPTZ | NULL только у `draft` (US-17) |
+| `ends_at` | TIMESTAMPTZ | NULL только у `draft`, позже `starts_at` (US-17) |
 | `status` | ENUM | `draft` / `published` / `unpublished` |
 | `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL |
+
+CHECK `ck_promotions_published_has_dates`: у опубликованной и снятой с публикации акции оба срока заполнены.
 
 ### `events`
 
@@ -111,11 +113,13 @@ UNIQUE `(source, external_id)`.
 | `id` | UUID | PK |
 | `title` | VARCHAR(255) | NOT NULL |
 | `image_url` | VARCHAR(500) | NULL |
-| `starts_at` | TIMESTAMPTZ | NOT NULL |
-| `ends_at` | TIMESTAMPTZ | NULL |
+| `starts_at` | TIMESTAMPTZ | NULL только у `draft` (US-17) |
+| `ends_at` | TIMESTAMPTZ | NULL, позже `starts_at` |
 | `is_period` | BOOLEAN | default `false` |
 | `status` | ENUM | `draft` / `published` / `unpublished` |
 | `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL |
+
+CHECK `ck_events_published_has_starts_at`: у опубликованного и снятого с публикации события `starts_at` заполнен.
 
 ### `otp_codes` (US-03)
 

@@ -20,5 +20,46 @@ services:
     ports:
       - "6379:6379"
 
+  # Хранилище изображений акций и событий (US-17). Консоль: http://localhost:9011
+  # Официальные образы MinIO больше не публикуются, используем сборку Chainguard
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: kumurska
+      MINIO_ROOT_PASSWORD: kumurska-dev-secret
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - minio_data:/data
+
+  # Одноразовая настройка: дождаться MinIO, создать бакет и открыть файлы на чтение,
+  # потому что image_url отдаётся клиентам как есть. В образе mc нет shell,
+  # поэтому каждый шаг выполняется отдельным контейнером.
+  minio-ready:
+    &mc
+    image: cgr.dev/chainguard/minio-client:latest
+    environment:
+      MC_HOST_local: http://kumurska:kumurska-dev-secret@minio:9000
+    depends_on: [minio]
+    command: ["ready", "local"]
+    restart: "no"
+
+  minio-bucket:
+    <<: *mc
+    depends_on:
+      minio-ready:
+        condition: service_completed_successfully
+    command: ["mb", "--ignore-existing", "local/kumurska-content"]
+
+  minio-public:
+    <<: *mc
+    depends_on:
+      minio-bucket:
+        condition: service_completed_successfully
+    command: ["anonymous", "set", "download", "local/kumurska-content"]
+
 volumes:
   postgres_data:
+  minio_data:

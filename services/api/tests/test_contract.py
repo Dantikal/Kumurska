@@ -24,6 +24,15 @@ def test_all_methods_present():
         "/api/v1/content/promotions": {"get"},
         "/api/v1/content/promotions/{id}": {"get"},
         "/api/v1/content/events": {"get"},
+        "/api/v1/admin/content/promotions": {"get", "post"},
+        "/api/v1/admin/content/promotions/{id}": {"get", "patch"},
+        "/api/v1/admin/content/promotions/{id}/publish": {"post"},
+        "/api/v1/admin/content/promotions/{id}/unpublish": {"post"},
+        "/api/v1/admin/content/events": {"get", "post"},
+        "/api/v1/admin/content/events/{id}": {"get", "patch"},
+        "/api/v1/admin/content/events/{id}/publish": {"post"},
+        "/api/v1/admin/content/events/{id}/unpublish": {"post"},
+        "/api/v1/admin/content/images": {"post"},
     }
     for path, methods in expected.items():
         assert path in paths, f"Нет пути {path}"
