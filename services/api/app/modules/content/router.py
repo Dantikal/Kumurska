@@ -8,7 +8,12 @@ from app.core.database import get_db
 from app.core.errors import ApiError
 from app.core.schemas import ErrorResponse, Page
 from app.modules.content import service as content_service
-from app.modules.content.schemas import EventRead, PromotionRead
+from app.modules.content.models import LegalDocumentType
+from app.modules.content.schemas import (
+    EventRead,
+    LegalDocumentRead,
+    PromotionRead,
+)
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -51,4 +56,22 @@ async def list_events(
         session=db,
         cursor=cursor,
         limit=limit,
+    )
+
+
+@router.get(
+    "/documents/{document_type}",
+    response_model=LegalDocumentRead,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def get_legal_document(
+    document_type: LegalDocumentType,
+    db: AsyncSession = Depends(get_db),
+) -> LegalDocumentRead:
+    return await content_service.get_legal_document(
+        session=db,
+        document_type=document_type,
     )
