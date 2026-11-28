@@ -33,3 +33,41 @@ async def get_purchase_items(
 
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_purchase_for_update(
+    session: AsyncSession,
+    purchase_id: UUID,
+) -> Purchase | None:
+    stmt = select(Purchase).where(Purchase.id == purchase_id).with_for_update()
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_purchase_by_external_id(
+    session: AsyncSession,
+    source: str,
+    external_id: str,
+) -> Purchase | None:
+    stmt = select(Purchase).where(
+        Purchase.source == source,
+        Purchase.external_id == external_id,
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def create_purchase(
+    session: AsyncSession,
+    purchase: Purchase,
+) -> Purchase:
+    session.add(purchase)
+    await session.flush()
+    return purchase
+
+
+async def create_purchase_items(
+    session: AsyncSession,
+    items: list[PurchaseItem],
+) -> list[PurchaseItem]:
+    session.add_all(items)
+    await session.flush()
+    return items

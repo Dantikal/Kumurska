@@ -36,6 +36,7 @@ class Purchase(IdMixin, TimestampMixin, Base):
     receipt_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    points_to_redeem: Mapped[int] = mapped_column(Integer, default=0)
     purchased_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[PurchaseStatus] = mapped_column(
         enum_column(PurchaseStatus), default=PurchaseStatus.PENDING
